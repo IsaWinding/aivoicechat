@@ -15,7 +15,7 @@ const sdk = { Agent: { async create(options) {
   }; }, async [Symbol.asyncDispose]() {} };
 } } };
 vm.runInNewContext(compiled.outputFiles[0].text, { module, exports: module.exports, require: name => name === '@cursor/sdk' ? sdk : require(name), setTimeout, clearTimeout, AbortController });
-const { SpokenReplyComposer, spokenReplyPrompt } = module.exports;
+const { SpokenReplyComposer, spokenReplyPrompt, isSpeakableReply } = module.exports;
 const options = { apiKey: 'test-only', model: 'composer-2.5', cwd: 'test' };
 const context = { latestQuestion: '能上线了吗？', recentConversation: [],
   fullResult: '已经修改代码。\n'.repeat(80) + '最终结论：验证未通过，不能上线。',
@@ -34,6 +34,18 @@ test('prompt includes latest focus, tail conclusion, anomalies, and interrupted 
   const prompt = spokenReplyPrompt(context);
   for (const text of ['能上线了吗', '最终结论：验证未通过', '已经定位到原因', 'interrupted']) assert.ok(prompt.includes(text));
   assert.ok(prompt.includes('不要摘抄第一段'));
+  assert.ok(prompt.includes('禁止逐条朗读命令原文'));
+});
+
+test('isSpeakableReply rejects command dumps but allows intent summaries', () => {
+  assert.equal(isSpeakableReply('不能上线，验证还没有完成。'), true);
+  assert.equal(isSpeakableReply('需要先安装依赖，再编译打包，具体命令看文字。'), true);
+  assert.equal(isSpeakableReply('npm install 然后 npm run build'), false);
+  assert.equal(isSpeakableReply('先运行 git clone 再 cd 进去'), false);
+  assert.equal(isSpeakableReply('第一步执行 pip install，第二步 python main.py'), false);
+  assert.equal(isSpeakableReply('请运行 docker compose up --build'), false);
+  assert.equal(isSpeakableReply(''), false);
+  assert.equal(isSpeakableReply('长'.repeat(221)), false);
 });
 
 test('cancellation during initialization returns promptly and prevents subsequent send', async () => {
@@ -54,7 +66,7 @@ test('timeout falls back without reading a potentially misleading excerpt', asyn
 });
 
 test('overlong or code-containing outputs use explicit fallback', async () => {
-  for (const text of ['npm test', '```js test```', '长'.repeat(221), '']) {
+  for (const text of ['npm test', '先运行 npm install 再 npm run build', '```js test```', '长'.repeat(221), '']) {
     const session = { async ensure() {}, async send() { return { status: 'finished', result: text }; }, async cancel() {}, async dispose() {} };
     const reply = await new SpokenReplyComposer(() => session).compose(options, context);
     assert.equal(reply.fallback, true);

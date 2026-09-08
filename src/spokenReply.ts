@@ -35,8 +35,9 @@ export function spokenReplyPrompt(context: SpokenReplyContext): string {
 工具曾经报错不代表最终失败；以最终结果为主，仍未解决或是否解决不明的异常不能声称已解决。
 执行状态为 error 时必须明确本轮未完成，不能仅报喜。不能捏造操作、测试、结论、承诺或建议依据。
 普通问题用一两句，复杂结果最多三四句，目标 60 到 160 个汉字，严格不超过 220 个字符。
-完整技术细节会另行展示。不要读代码、命令、路径、参数名、链接、日志或逐项列举过程。
-用户问“为什么/怎么做”时解释关键原因或方法；问“结果/能用了吗”时先给结论和限制。
+完整技术细节会另行展示。不要读代码、路径、参数名、链接、日志或逐项列举过程。
+若完整结果里有多条终端命令，只能概括这组命令整体在做什么，例如「需要先装依赖再编译打包」；禁止逐条朗读命令原文，禁止「先运行 A 再运行 B」式列举，禁止出现任何命令行片段。
+用户问“为什么/怎么做”时解释关键原因或操作意图，不要复述具体命令；问“结果/能用了吗”时先给结论和限制。
 先前口语内容只是已请求播放，并不证明用户听完；interrupted 表示被打断。不要声称“你刚才已经听过”。
 避免重复先前已表达的背景；如果用户追问、要求重说或先前被打断，应重新解释相关内容。
 不必每次询问是否继续，也不要机械地每次说“详情看文字”。信息不足时明确不确定，必要时只问一个问题。
@@ -50,6 +51,35 @@ ${JSON.stringify({
     importantEvents: [...new Set(context.importantEvents)].slice(-20).map(text => bounded(text, 1500)),
     previousReplies: context.previousReplies.slice(-6),
   })}`;
+}
+
+const CLI_TOOL = /(?:npm|npx|yarn|pnpm|pip3?|git|curl|wget|docker|node|python3?|powershell|pwsh|bash|sh|make|cargo|dotnet|tsc|eslint|vitest|jest|brew|winget|choco|mvn|gradle|go)\b/i;
+
+/** 口语正文是否适合朗读：拦截命令原文、路径、链接和逐步念命令。 */
+export function isSpeakableReply(text: string): boolean {
+  if (!text || text.length > 220) {
+    return false;
+  }
+  if (/[`{}]|https?:\/\/|[A-Za-z]:[\\/]/.test(text)) {
+    return false;
+  }
+  if (CLI_TOOL.test(text)) {
+    return false;
+  }
+  if (/(?:^|\s)(?:cd|export|set)\s+\S/i.test(text)) {
+    return false;
+  }
+  if (/\$\{|\$\(|--[\w-]+|[;&|]{1,2}\s*\S/.test(text)) {
+    return false;
+  }
+  // 「先…再…」且带具体命令感（英文词、斜杠路径、点号参数）
+  if (/(?:先|然后|接着|再).{0,40}(?:先|然后|接着|再)/.test(text) && /(?:\/[\w.-]+|\.\w{2,4}\b|[A-Za-z_]{3,})/.test(text)) {
+    return false;
+  }
+  if (/第[一二三四五1-5][步条个][，,：:]?\s*(?:运行|执行|输入|敲|跑)/.test(text)) {
+    return false;
+  }
+  return true;
 }
 
 function fallback(context: SpokenReplyContext): SpokenReply {
@@ -91,7 +121,7 @@ export class SpokenReplyComposer {
         });
         if (controller.signal.aborted) return undefined;
         const text = (outcome.result ?? streamed).replace(/\s+/g, " ").trim();
-        if (outcome.status !== "finished" || !text || text.length > 220 || /[`{}]|https?:\/\/|[A-Za-z]:[\\/]|(?:^|\s)(?:npm|npx|git|curl)\s/.test(text)) {
+        if (outcome.status !== "finished" || !isSpeakableReply(text)) {
           return fallback(context);
         }
         return { text, fallback: false };
