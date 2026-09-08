@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { AgentSession, AgentStartupError } from "./agentSession";
 import { MicBridge } from "./micBridge";
-import { interpretSdkEvent, toSpeechText } from "./progress";
+import { immediateAck, interpretSdkEvent, toSpeechText } from "./progress";
 import { SpokenReplyComposer, type SpokenHistoryItem } from "./spokenReply";
 import { SystemSpeaker } from "./systemTts";
 import type { ChatTranscriptItem, HostSettings, HostState, HostToWebview, WebviewToHost } from "./protocol";
@@ -299,7 +299,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.push({ id: assistantId, role: "assistant", text: "", done: false });
     this.post({ type: "assistantStart", id: assistantId });
     this.setState("running", "执行中");
-
+    this.speakImmediateAck(text);
 
     const model = vscode.workspace.getConfiguration("aivoicechat").get<string>("model") || "composer-2.5";
     let streamed = "";
@@ -439,6 +439,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const id = this.id("progress");
     this.push({ id, role: "progress", text, done: true });
     this.post({ type: "progress", id, text });
+  }
+
+  private speakImmediateAck(question: string): void {
+    if (!this.readSettings().autoSpeak || this.interrupted || this.resetting) {
+      return;
+    }
+    const text = immediateAck(question);
+    this.pushProgress(`已确认：${text}`);
+    this.spokenHistory.push({ text, delivery: "requested" });
+    this.spokenHistory = this.spokenHistory.slice(-6);
+    this.maybeSpeak(text, true);
   }
 
   private maybeSpeak(text: string, force = false): void {

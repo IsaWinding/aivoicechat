@@ -43,7 +43,7 @@ test('interruption suppresses stale deltas and final audio; newest input waits f
   h.runs[0].done.resolve({ status: 'finished', result: '旧结论' });
   await first; await settle();
   assert.equal(h.runs[1].text, '换个问题');
-  assert.ok(!h.events.some(e => e.type === 'speak' || e.text === '过期回答'));
+  assert.ok(!h.events.some(e => e.type === 'speak' && (e.text === '过期回答' || e.text === '旧结论')));
   h.runs[1].done.resolve({ status: 'finished', result: '最新结论。' }); await settle();
   assert.ok(h.events.some(e => e.type === 'speak' && e.text === '最新结论。'));
 });
@@ -83,10 +83,21 @@ test('a new partial utterance must prevent queued input from starting before use
   h.runs[1].done.resolve({ status: 'finished' }); await second;
 });
 
+test('immediate acknowledgment speaks before task finishes, then final reply speaks again', async () => {
+  const h = host();
+  const ack = '好的，收到。我现在开始处理，完成后告诉你结果。';
+  const pending = h.provider.handleSend('帮我改一下颜色'); await settle();
+  assert.ok(h.events.some(e => e.type === 'speak' && e.text === ack));
+  h.runs[0].done.resolve({ status: 'finished', result: '颜色已经改好了。' }); await pending;
+  assert.ok(h.events.some(e => e.type === 'speak' && e.text === '颜色已经改好了。'));
+  assert.ok(h.events.filter(e => e.type === 'speak').length >= 2);
+});
+
 test('speech composer receives full result, user focus, and errors without reading raw tool progress', async () => {
   const h = host(); const pending = h.provider.handleSend('现在可以上线了吗？'); await settle();
+  const ack = '好的，收到。我现在开始处理，完成后告诉你结果。';
   h.runs[0].handlers.onEvent({ type: 'tool_call', name: 'Shell', status: 'error', args: { command: 'npm test' } });
-  assert.ok(!h.events.some(e => e.type === 'speak'));
+  assert.ok(!h.events.some(e => e.type === 'speak' && e.text !== ack));
   h.runs[0].done.resolve({ status: 'finished', result: '开头是进度。\n\n最终验证失败，不能上线。' }); await pending;
   assert.equal(h.compositions[0].latestQuestion, '现在可以上线了吗？');
   assert.match(h.compositions[0].fullResult, /最终验证失败/);
@@ -100,15 +111,17 @@ test('interrupt while spoken reply is being composed suppresses late speech', as
   h.runs[0].done.resolve({ status: 'finished', result: '完整文字结果' }); await settle();
   await h.provider.interrupt();
   completion.resolve({ text: '过期口语回答', fallback: false }); await pending;
-  assert.ok(!h.events.some(e => e.type === 'speak'));
-  assert.equal(h.provider.spokenHistory.length, 0);
+  assert.ok(!h.events.some(e => e.type === 'speak' && e.text === '过期口语回答'));
+  assert.equal(h.provider.spokenHistory.length, 1);
+  assert.equal(h.provider.spokenHistory[0].delivery, 'interrupted');
 });
 
-test('disabled speech does not invoke extra model composition', async () => {
+test('disabled speech does not invoke extra model composition or immediate ack', async () => {
   const h = host(); h.settings.autoSpeak = false;
   const pending = h.provider.handleSend('问题'); await settle();
   h.runs[0].done.resolve({ status: 'finished', result: '完整文字' }); await pending;
   assert.equal(h.compositions.length, 0);
+  assert.ok(!h.events.some(e => e.type === 'speak'));
 });
 
 test('follow-up gets previous spoken content; reset clears it', async () => {
@@ -117,7 +130,7 @@ test('follow-up gets previous spoken content; reset clears it', async () => {
   await h.provider.interrupt();
   const second = h.provider.handleSend('为什么？'); await settle();
   h.runs[1].done.resolve({ status: 'finished', result: '验证没有通过。' }); await second;
-  assert.equal(h.compositions[1].previousReplies[0].text, '不能上线。');
-  assert.equal(h.compositions[1].previousReplies[0].delivery, 'interrupted');
+  const interrupted = h.compositions[1].previousReplies.find(item => item.delivery === 'interrupted');
+  assert.equal(interrupted?.text, '不能上线。');
   await h.provider.newSession(); assert.equal(h.provider.spokenHistory.length, 0);
 });

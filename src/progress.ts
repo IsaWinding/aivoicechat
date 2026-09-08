@@ -98,6 +98,11 @@ export function replyForSpeech(text: string): string {
   return toSpeechText(summary, 180);
 }
 
+/** 收到用户问题后立即播报的短确认，让用户知道已开始处理。 */
+export function immediateAck(_question: string): string {
+  return "好的，收到。我现在开始处理，完成后告诉你结果。";
+}
+
 export function summarizeForSpeech(text: string, maxChars = 120): string {
   const cleaned = text.replace(/\s+/g, " ").trim();
   if (!cleaned) {
