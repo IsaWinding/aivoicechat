@@ -25,6 +25,8 @@
 - [用法](#用法)
 - [命令与快捷键](#命令与快捷键)
 - [语音说明](#语音说明)
+- [语音交互流程](#语音交互流程)
+- [平台兼容](#平台兼容)
 - [对话体验](#对话体验)
 - [常见问题](#常见问题)
 - [开发与测试](#开发与测试)
@@ -38,7 +40,8 @@
 - 侧边栏文字 / 语音输入，本机 Cursor Agent 执行任务
 - 浏览器麦克风桥（解决 Webview 无法授权麦克风的问题）
 - Windows 系统 TTS 播报；其他平台走浏览器或面板朗读
-- 独立口语模型整理长回答，结合上下文挑重点播报
+- **即时确认播报**：收到问题后先口头确认「已开始处理」，任务完成后再播报结论
+- 独立口语模型整理长回答，结合上下文挑重点播报；**不朗读命令、代码块和工具过程**
 - 插话打断、连续补充合并、停止 / 新会话 / 取消任务
 
 ## 架构简述
@@ -48,12 +51,15 @@ flowchart LR
   U[用户语音/文字] --> P[侧边栏面板]
   P --> B[127.0.0.1 浏览器桥]
   B --> R[浏览器 SpeechRecognition]
+  P -->|开启播报| ACK[即时确认播报]
+  ACK --> TTS1[系统 TTS / 浏览器朗读]
+  TTS1 --> U
   P --> A[Cursor SDK Agent]
   A --> W[工作区工具读写/命令]
   A --> T[完整文字结果]
   T --> S[口语整理 Agent]
-  S --> TTS[系统 TTS / 浏览器朗读]
-  TTS --> U
+  S --> TTS2[系统 TTS / 浏览器朗读]
+  TTS2 --> U
 ```
 
 - **任务 Agent**：读写文件、跑命令，输出完整 Markdown 文字
@@ -130,15 +136,40 @@ Cursor / VS Code 的 Webview 不允许访问麦克风（无法弹出授权），
 - 其他系统使用浏览器页朗读（页面需被点击过一次），无浏览器页时在 Cursor 面板内朗读
 - 完整结果先显示为文字，再由独立模型调用组织口语回答：结合最新问题、近期对话、完整结果、重要异常和最近六次口语记录挑重点，避免重复背景。代码、命令和详情留在文字中，工具过程不逐条朗读
 - 口语通常为一到四句话，目标 60–160 字，最多 220 字。口语整理使用同一 Cursor 模型，但禁用全部工具，不会执行文件或命令操作，也不把内部整理提示写入任务会话
-- 开启播报时每轮增加一次模型调用，带来额外费用与等待；实测三个样例约 3–10 秒。超过 15 秒或生成失败时提示查看文字，不把截断的片段当作完整总结。关闭播报则不发起这次调用
+- 开启播报时每轮增加一次模型调用，带来额外费用与等待；实测三个样例约 3–10 秒。超过 15 秒或生成失败时提示查看文字，不把截断的片段当作完整总结。关闭播报则不发起这次调用，也不会播报即时确认
 - 插话、停止、新会话和关闭播报会使待生成的旧口语失效。口语历史记录的是「已请求播放／被打断」，不代表精确知道用户听到了哪个字
 
 云端 Whisper / Azure / 阿里接口已预留在 `src/voice/`，第一版未接通。
+
+## 语音交互流程
+
+一次完整语音对话通常分三个阶段：
+
+| 阶段 | 时机 | 播报内容 | 说明 |
+| --- | --- | --- | --- |
+| **即时确认** | 发送问题后立刻 | 「好的，收到。我现在开始处理，完成后告诉你结果。」 | 固定短句，无需额外模型；面板进度区同步显示「已确认：…」 |
+| **任务执行** | Agent 运行期间 | 一般不播报 | 工具调用过程只显示文字进度，不逐条朗读 |
+| **结论播报** | 任务完成后 | 口语整理后的摘要 | 独立模型压缩长回答；失败/未验证等关键信息会保留 |
+
+关闭「播报」或 `aivoicechat.autoSpeak = false` 时，三个阶段均不发声，也不发起口语整理模型调用。
+
+## 平台兼容
+
+| 能力 | Windows | macOS / Linux |
+| --- | --- | --- |
+| 语音输入（浏览器桥） | ✅ 推荐 Edge | ✅ 推荐 Chrome / Edge |
+| 系统 TTS 播报 | ✅ System.Speech | ❌ 需用浏览器或面板朗读 |
+| 即时确认 + 结论播报 | ✅ | ✅（需先点击浏览器页） |
+| 插话打断 | ✅ | ✅ |
+| 本机 Agent 执行 | ✅ | ✅ |
+
+国内网络下语音识别优先使用 **Edge**；Chrome 可能无法连接 Google 语音服务。
 
 ## 对话体验
 
 - 输入框支持 Shift+Enter 换行，中文输入法选字时不会误发送
 - 文字消息也能打断旧回答；连续补充会合并后接续
+- 开启播报时，发送问题后会**先听到确认**，任务结束后再听到结论；插话会取消待播的旧结论，但已播的确认不会回退
 - 停止按钮同时停止语音和当前任务；新会话清理待发送内容。取消不能撤销已经完成的文件或命令操作
 - 语音使用浏览器 SpeechRecognition 和系统 TTS，并非端到端实时语音模型。识别延迟、外放回声和音色取决于浏览器、网络及设备
 
@@ -156,7 +187,7 @@ Cursor / VS Code 的 Webview 不允许访问麦克风（无法弹出授权），
 - Windows 确认已安装中文语音包；可运行命令「试播语音（测试扬声器）」
 - 非 Windows 需先**点击浏览器识别页**一次，才能播放 TTS
 - 检查 `aivoicechat.autoSpeak` 是否为 `true`，面板或浏览器页「播报」是否开启
-- 口语整理超时（15 秒）时会提示看文字，属正常降级
+- 若能看到文字进度但听不到「好的，收到…」，多半是播报被关或 TTS 未就绪；结论整理超时（15 秒）时会提示看文字，属正常降级
 
 ### Agent 无响应或报错
 
@@ -193,7 +224,7 @@ export CURSOR_API_KEY="你的 Key"
 | `npm run compile` | 编译 TypeScript 到 `out/` |
 | `npm run watch` | 监听文件变更并自动编译 |
 | `npm run package` | 打包 VSIX |
-| `npm test` | 本地回归测试（HTTP 桥、对话逻辑、口语整理等） |
+| `npm test` | 本地回归测试（28 项：HTTP 桥、对话逻辑、即时确认、口语整理等） |
 | `npm run test:smoke` | 冒烟测试 |
 | `npm run test:live` | 真实 Cursor 模型对话测试（需 `CURSOR_API_KEY`） |
 | `npm run test:spoken` | 真实模型口语整理三场景测试，结果写入 `out/live-spoken-results.json` |
@@ -209,6 +240,7 @@ aivoicechat/
 │   ├── chatPanel.ts     # 侧边栏 Webview 面板
 │   ├── agentSession.ts  # Cursor SDK Agent 会话
 │   ├── micBridge.ts     # 浏览器麦克风本地桥
+│   ├── progress.ts      # 进度文案、即时确认、口语预处理
 │   ├── spokenReply.ts   # 口语整理与播报
 │   └── voice/           # 云端语音接口预留
 ├── media/               # Webview 静态资源（CSS/JS/图标/识别页）
@@ -221,7 +253,8 @@ aivoicechat/
 
 | 版本 | 说明 |
 | --- | --- |
-| **0.5.1** | 浏览器麦克风桥；Windows 系统 TTS；独立口语整理 Agent；插话打断与连续补充；26 项本地测试 + 真实模型口语测试 |
+| **0.5.1+** | 任务开始时即时语音确认；口语播报过滤命令/代码块；打断逻辑与口语历史记录优化；28 项本地测试 |
+| **0.5.1** | 浏览器麦克风桥；Windows 系统 TTS；独立口语整理 Agent；插话打断与连续补充；真实模型口语测试 |
 
 ## 注意
 
@@ -234,4 +267,4 @@ aivoicechat/
 
 ---
 
-**English (brief):** A Cursor/VS Code extension for voice and text chat with a local Cursor Agent. Speech input uses a localhost browser bridge (Webview cannot access the mic). Spoken replies are summarized by a separate tool-free Agent call. Requires Cursor API Key and Node.js ≥ 22.13.
+**English (brief):** A Cursor/VS Code extension for voice and text chat with a local Cursor Agent. Speech input uses a localhost browser bridge (Webview cannot access the mic). When auto-speak is on, the extension first speaks an immediate acknowledgment, then summarizes the final result via a separate tool-free Agent call (commands and code blocks are not read aloud). Requires Cursor API Key and Node.js ≥ 22.13. Windows uses system TTS; other platforms use browser or panel speech.
