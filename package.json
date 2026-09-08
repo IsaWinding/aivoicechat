@@ -1,0 +1,157 @@
+{
+  "name": "aivoicechat",
+  "displayName": "AI 语音聊天",
+  "description": "用语音或文字把任务交给 Cursor Agent，并在侧边栏以文字和语音回报进度",
+  "version": "0.5.1",
+  "publisher": "aivoicechat",
+  "engines": {
+    "vscode": "^1.90.0",
+    "node": ">=22.13.0"
+  },
+  "categories": [
+    "Chat",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aivoicechat",
+          "title": "AI 语音聊天",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "aivoicechat": [
+        {
+          "type": "webview",
+          "id": "aivoicechat.chatView",
+          "name": "对话"
+        }
+      ],
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "aivoicechat.explorerView",
+          "name": "AI 语音聊天"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "aivoicechat.chatView",
+        "contents": "打开 AI 语音聊天面板后，用语音或文字给 Cursor 下达任务。\n[打开面板](command:aivoicechat.open)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "aivoicechat.open",
+        "key": "ctrl+alt+v",
+        "mac": "cmd+alt+v"
+      }
+    ],
+    "commands": [
+      {
+        "command": "aivoicechat.open",
+        "title": "打开 AI 语音聊天 Voice Chat",
+        "category": "AI 语音聊天"
+      },
+      {
+        "command": "aivoicechat.toggleMic",
+        "title": "开始/停止语音输入",
+        "category": "AI 语音聊天"
+      },
+      {
+        "command": "aivoicechat.newSession",
+        "title": "新会话",
+        "category": "AI 语音聊天"
+      },
+      {
+        "command": "aivoicechat.cancel",
+        "title": "取消当前任务",
+        "category": "AI 语音聊天"
+      },
+      {
+        "command": "aivoicechat.testSpeak",
+        "title": "试播语音（测试扬声器）",
+        "category": "AI 语音聊天"
+      }
+    ],
+    "configuration": {
+      "title": "AI 语音聊天",
+      "properties": {
+        "aivoicechat.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Cursor API Key。也可使用环境变量 CURSOR_API_KEY。申请地址：https://cursor.com/dashboard/integrations"
+        },
+        "aivoicechat.model": {
+          "type": "string",
+          "default": "composer-2.5",
+          "description": "本机 Agent 使用的模型 ID"
+        },
+        "aivoicechat.language": {
+          "type": "string",
+          "default": "zh-CN",
+          "description": "语音识别与播报语言，例如 zh-CN、en-US"
+        },
+        "aivoicechat.speechInput": {
+          "type": "string",
+          "enum": [
+            "browser",
+            "webview"
+          ],
+          "enumDescriptions": [
+            "在系统浏览器（Edge/Chrome）中识别语音，浏览器会弹出麦克风授权（推荐）",
+            "在 Cursor 面板内识别（Cursor 通常禁止 Webview 使用麦克风，多数情况下不可用）"
+          ],
+          "default": "browser",
+          "description": "语音输入方式"
+        },
+        "aivoicechat.speechOutput": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "system",
+            "browser",
+            "webview"
+          ],
+          "enumDescriptions": [
+            "自动：Windows 用系统语音，其余用浏览器页/面板",
+            "Windows 系统语音（最稳，不受浏览器限制）",
+            "浏览器语音页朗读（需先点击页面）",
+            "Cursor 面板内朗读"
+          ],
+          "default": "auto",
+          "description": "语音播报方式"
+        },
+        "aivoicechat.autoSpeak": {
+          "type": "boolean",
+          "default": true,
+          "description": "自动用语音播报任务进度和结论"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "vscode:prepublish": "node esbuild.mjs --production",
+    "package": "vsce package",
+    "test:smoke": "node esbuild.mjs --smoke && node out/smoke.js"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.25.4",
+    "typescript": "^5.8.3"
+  }
+}

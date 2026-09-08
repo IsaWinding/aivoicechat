@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cursor 语音输入</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; background: #0c0d10; color: #f3f6fb;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 24px;
+    }
+    .card {
+      display: flex; align-items: center; gap: 16px; min-width: 260px; max-width: 520px; width: 100%;
+      padding: 14px 18px; border: 1px solid rgba(255,255,255,.08); border-radius: 22px;
+      background: rgba(22,24,28,.85); box-shadow: 0 10px 40px rgba(0,0,0,.35);
+    }
+    .card .title { font-size: 16px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card .sub { margin-top: 3px; color: #9aa3b2; font-size: 12px; }
+    .copy { flex: 1; min-width: 0; }
+    .dot { width: 28px; height: 28px; border-radius: 50%; background: #3a3f48; flex: 0 0 auto; }
+    .dot.listening { background: #f0c36a; box-shadow: 0 0 12px #f0c36a88; }
+    .dot.running { background: #4aa3ff; box-shadow: 0 0 12px #4aa3ff88; }
+    .dot.done { background: #2f9e5f; box-shadow: 0 0 12px #2f9e5f88; }
+    .orb {
+      width: 200px; height: 200px; border: 0; border-radius: 50%; cursor: pointer;
+      background:
+        radial-gradient(circle at 32% 28%, #fff 0 8%, transparent 22%),
+        radial-gradient(circle at 60% 40%, #d9f0ff 0 18%, transparent 42%),
+        radial-gradient(circle at 40% 70%, #7ec4ff 0 24%, transparent 50%),
+        radial-gradient(circle at 50% 50%, #9fd4ff 0 35%, #3d8adf 62%, #163a72 100%);
+      box-shadow: 0 20px 60px rgba(40,120,220,.28), 0 0 80px rgba(90,170,255,.35);
+      animation: breathe 4.2s ease-in-out infinite;
+    }
+    .orb.listening { animation: pulse 1.1s ease-in-out infinite; }
+    .hint { color: #9aa3b2; font-size: 13px; text-align: center; max-width: 520px; line-height: 1.6; }
+    .interim { min-height: 24px; font-size: 18px; text-align: center; max-width: 620px; }
+    .row { display: flex; gap: 12px; }
+    button.round {
+      width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(255,255,255,.08);
+      background: #1b1d22; color: #e8edf5; cursor: pointer; display: grid; place-items: center;
+    }
+    button.round.active { color: #f0c36a; border-color: #f0c36a66; }
+    button.round.off { color: #6b7280; position: relative; }
+    button.round.off::after { content: ""; position: absolute; width: 2px; height: 24px; background: #e5484d; transform: rotate(45deg); border-radius: 1px; }
+    button.round svg { width: 18px; height: 18px; }
+    label.auto { color: #9aa3b2; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+    .log { width: 100%; max-width: 620px; max-height: 26vh; overflow: auto; font-size: 12px; color: #9aa3b2; border-top: 1px solid rgba(255,255,255,.08); padding-top: 10px; }
+    .log div { padding: 2px 0; border-left: 2px solid #3d6bff88; padding-left: 8px; margin: 4px 0; }
+    .log div.assistant { color: #dfe7f5; border-color: #2f9e5f; white-space: pre-wrap; }
+    .log div.error { color: #f0b4b7; border-color: #c4545a; }
+    .reply {
+      width: 100%; max-width: 620px; padding: 12px 14px; border-radius: 14px;
+      background: #1d2620; border: 1px solid rgba(47,158,95,.35); font-size: 14px; line-height: 1.6;
+      white-space: pre-wrap; display: none;
+    }
+    .reply.show { display: block; }
+    .reply .who { display: block; color: #9aa3b2; font-size: 11px; margin-bottom: 4px; }
+    @keyframes breathe { 50% { transform: scale(1.04); } }
+    @keyframes pulse { 50% { transform: scale(1.08); filter: brightness(1.15); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="copy">
+      <div class="title" id="title">Cursor 语音输入</div>
+      <div class="sub" id="sub">点击光球开始，浏览器会请求麦克风权限</div>
+    </div>
+    <div class="dot" id="dot"></div>
+  </div>
+
+  <button class="orb" id="orb" title="开始/停止聆听"></button>
+  <div class="interim" id="interim"></div>
+  <div class="hint" id="hint">点击光球开始说话，说完自动发给 Cursor；回答会由系统语音朗读。</div>
+
+  <div class="row">
+    <button class="round" id="micBtn" title="开始/停止">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4"/></svg>
+    </button>
+    <button class="round" id="clearBtn" title="清空记录">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 7l10 10M17 7L7 17"/></svg>
+    </button>
+    <button class="round active" id="speakBtn" title="语音播报开/关">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 10v4h4l5 4V6L8 10H4z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg>
+    </button>
+    <button class="round" id="testBtn" title="试听语音（检查耳机）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></svg>
+    </button>
+  </div>
+  <label class="auto"><input type="checkbox" id="autoSend" checked /> 说完自动发送（关闭后需点光球确认）</label>
+
+  <div class="reply" id="reply"><span class="who">Cursor</span><span id="replyText"></span></div>
+  <div class="log" id="log"></div>
+
+  <script>
+    const token = "__TOKEN__";
+    const q = "?t=" + token;
+    const orb = document.getElementById("orb");
+    const micBtn = document.getElementById("micBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const title = document.getElementById("title");
+    const sub = document.getElementById("sub");
+    const dot = document.getElementById("dot");
+    const interim = document.getElementById("interim");
+    const hint = document.getElementById("hint");
+    const log = document.getElementById("log");
+    const autoSend = document.getElementById("autoSend");
+
+    const speakBtn = document.getElementById("speakBtn");
+    const testBtn = document.getElementById("testBtn");
+    const reply = document.getElementById("reply");
+    const replyText = document.getElementById("replyText");
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let wantListening = false;
+    let pendingText = "";
+    let speakEnabled = true;
+    let speaking = false;
+    let testingUntil = 0;
+
+    function pickVoice() {
+      const voices = window.speechSynthesis.getVoices();
+      return (
+        voices.find((v) => /zh[-_]CN/i.test(v.lang) && /Xiaoxiao|Yunxi|Natural|Huihui|Yaoyao/i.test(v.name)) ||
+        voices.find((v) => /zh[-_]CN/i.test(v.lang)) ||
+        voices.find((v) => /^zh/i.test(v.lang)) ||
+        null
+      );
+    }
+
+    // ---- 语音播报 ----
+    // Edge/Chrome 规则：页面没被点击过之前 speechSynthesis 会被静默拦截；
+    // cancel() 紧接 speak() 会吞掉语音；单句过长会中途停。这里逐一规避。
+    let unlocked = false;
+    let pendingSpeech = [];   // 未解锁时暂存
+    let queue = [];           // 待读片段
+    let currentUtter = null;
+
+    function chunk(text) {
+      const parts = text.split(/(?<=[。！？；!?;\n])/).map((s) => s.trim()).filter(Boolean);
+      const out = [];
+      let buf = "";
+      for (const p of parts) {
+        if ((buf + p).length > 90 && buf) { out.push(buf); buf = p; } else { buf += p; }
+      }
+      if (buf) out.push(buf);
+      return out.length ? out : [text];
+    }
+
+    function pauseMic() {
+      if (!speaking) {
+        speaking = true;
+        if (recognition && wantListening) { try { recognition.stop(); } catch {} }
+        dot.className = "dot running";
+        sub.textContent = "正在播报…";
+      }
+    }
+
+    function resumeMic() {
+      speaking = false;
+      currentUtter = null;
+      if (wantListening) {
+        try { recognition.start(); } catch {}
+        sub.textContent = "正在聆听…";
+      }
+    }
+
+    function pump() {
+      if (currentUtter) return;
+      const part = queue.shift();
+      if (!part) { resumeMic(); return; }
+      const u = new SpeechSynthesisUtterance(part);
+      u.lang = "zh-CN";
+      const v = pickVoice();
+      if (v) u.voice = v;
+      u.rate = 1.0;
+      let started = false;
+      u.onstart = () => { started = true; pauseMic(); };
+      u.onend = () => { currentUtter = null; pump(); };
+      u.onerror = (e) => {
+        currentUtter = null;
+        if (e.error === "interrupted" || e.error === "canceled") { queue = []; resumeMic(); return; }
+        pump();
+      };
+      currentUtter = u;
+      window.speechSynthesis.speak(u);
+      // 8 秒仍没开始（Edge 在线音色首次加载较慢）：视为被拦截，提示用户点一下页面
+      setTimeout(() => {
+        if (!started && currentUtter === u) {
+          unlocked = false;
+          window.speechSynthesis.cancel();
+          currentUtter = null;
+          pendingSpeech.push(part, ...queue);
+          queue = [];
+          resumeMic();
+          showUnlockHint();
+        }
+      }, 8000);
+    }
+
+    function showUnlockHint() {
+      hint.innerHTML = '<b style="color:#f0c36a">浏览器阻止了自动播放。请点击页面任意位置，即可听到 Cursor 的回答。</b>';
+    }
+
+    function speak(text) {
+      if ((!speakEnabled && Date.now() > testingUntil) || !text || !window.speechSynthesis) return;
+      if (!unlocked) { pendingSpeech.push(text); showUnlockHint(); return; }
+      const parts = chunk(text);
+      if (currentUtter || queue.length) {
+        // 打断当前播报，稍等再读新内容（避免 cancel 后立刻 speak 被吞）
+        queue = [];
+        window.speechSynthesis.cancel();
+        currentUtter = null;
+        setTimeout(() => { queue = parts; pump(); }, 120);
+        return;
+      }
+      queue = parts;
+      pump();
+    }
+
+    // 任意一次点击都算作用户激活：解锁语音，并补读之前攒下的内容
+    function unlock() {
+      if (unlocked) return;
+      unlocked = true;
+      if (pendingSpeech.length) {
+        const text = pendingSpeech.join(" ");
+        pendingSpeech = [];
+        hint.textContent = "说完一句会自动发给 Cursor 执行。保持这个页面打开即可。";
+        setTimeout(() => speak(text), 150);
+      }
+    }
+    document.addEventListener("pointerdown", unlock, true);
+    document.addEventListener("keydown", unlock, true);
+    if (navigator.userActivation && navigator.userActivation.hasBeenActive) unlocked = true;
+
+    // 喇叭按钮 = Cursor 的「语音播报」总开关（和 Cursor 面板里的那个是同一个设置）
+    function applyAutoSpeak(enabled) {
+      speakEnabled = enabled;
+      speakBtn.classList.toggle("active", enabled);
+      speakBtn.classList.toggle("off", !enabled);
+      speakBtn.title = enabled ? "语音播报：开（点击关闭）" : "语音播报：关（点击开启）";
+      if (!enabled) {
+        queue = []; pendingSpeech = [];
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+        resumeMic();
+        hint.innerHTML = '<b style="color:#f0c36a">语音播报已关闭，Cursor 的回答不会朗读。点喇叭按钮开启。</b>';
+      } else {
+        hint.textContent = "点击光球开始说话，说完自动发给 Cursor；回答会由系统语音朗读。";
+      }
+    }
+    speakBtn.addEventListener("click", () => {
+      applyAutoSpeak(!speakEnabled);
+      post("/auto-speak", { enabled: speakEnabled });
+    });
+    if (window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.addEventListener("voiceschanged", () => window.speechSynthesis.getVoices());
+    }
+
+    function addLog(text, cls) {
+      const el = document.createElement("div");
+      if (cls) el.className = cls;
+      el.textContent = text;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    async function post(path, body) {
+      try {
+        await fetch(path + q, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      } catch (e) {
+        sub.textContent = "无法连接 Cursor，请回到 Cursor 重新点击麦克风。";
+      }
+    }
+
+    function setListening(on) {
+      orb.classList.toggle("listening", on);
+      micBtn.classList.toggle("active", on);
+      dot.className = "dot" + (on ? " listening" : "");
+      sub.textContent = on ? "正在聆听…" : "已停止";
+      post("/state", { listening: on });
+    }
+
+    function sendText(text) {
+      if (!text) return;
+      queue = [];
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+      currentUtter = null;
+      reply.classList.remove("show");
+      title.textContent = text;
+      addLog("你：" + text);
+      post("/transcript", { text });
+      pendingText = "";
+      interim.textContent = "";
+    }
+
+    function start() {
+      if (!SR) {
+        hint.textContent = "这个浏览器不支持语音识别。请复制地址到 Edge 或 Chrome 打开。";
+        return;
+      }
+      wantListening = true;
+      recognition = new SR();
+      recognition.lang = navigator.language && navigator.language.startsWith("zh") ? "zh-CN" : "zh-CN";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.onstart = () => setListening(true);
+      recognition.onresult = (e) => {
+        let interimText = "";
+        let finalText = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const r = e.results[i];
+          if (r.isFinal) finalText += r[0].transcript; else interimText += r[0].transcript;
+        }
+        if (interimText) interim.textContent = interimText;
+        if (finalText) {
+          finalText = finalText.trim();
+          if (autoSend.checked) {
+            sendText(finalText);
+          } else {
+            pendingText = (pendingText + " " + finalText).trim();
+            interim.textContent = pendingText;
+            hint.textContent = "点击光球发送这句话";
+          }
+        }
+      };
+      recognition.onerror = (e) => {
+        const map = {
+          "not-allowed": "麦克风被拒绝。请点地址栏左侧的锁/图标，允许麦克风后刷新。",
+          "audio-capture": "找不到麦克风，请检查输入设备。",
+          "no-speech": "没有听到语音，继续说即可。",
+          "network": "语音服务连接失败。请改用 Edge 浏览器打开此页。",
+        };
+        const msg = map[e.error] || ("识别出错：" + e.error);
+        sub.textContent = msg;
+        if (e.error === "not-allowed" || e.error === "audio-capture" || e.error === "network") {
+          wantListening = false;
+          addLog(msg, "error");
+        }
+      };
+      recognition.onend = () => {
+        if (speaking) return; // 播报结束后由 speak() 恢复
+        if (wantListening) {
+          try { recognition.start(); } catch {}
+        } else {
+          setListening(false);
+        }
+      };
+      try { recognition.start(); } catch (err) { sub.textContent = String(err); }
+    }
+
+    function stop() {
+      wantListening = false;
+      if (recognition) { try { recognition.stop(); } catch {} }
+      setListening(false);
+    }
+
+    function toggle() {
+      if (!autoSend.checked && pendingText) {
+        sendText(pendingText);
+        hint.textContent = "说完一句后点击光球发送。";
+        return;
+      }
+      if (wantListening) stop(); else start();
+    }
+
+    orb.addEventListener("click", toggle);
+    micBtn.addEventListener("click", toggle);
+    clearBtn.addEventListener("click", () => { log.innerHTML = ""; interim.textContent = ""; pendingText = ""; });
+    // 试听：交给 Cursor 按当前设置（系统语音/浏览器）播一句，检查耳机是否有声
+    testBtn.addEventListener("click", () => {
+      sub.textContent = "正在试听，请注意听耳机…";
+      testingUntil = Date.now() + 8000; // 试听期间忽略「播报关闭」
+      post("/test-speak", {});
+    });
+
+    const es = new EventSource("/events" + q);
+    es.onmessage = (ev) => {
+      let data;
+      try { data = JSON.parse(ev.data); } catch { return; }
+      if (data.kind === "status") {
+        if (data.state === "running") { dot.className = "dot running"; sub.textContent = data.text; }
+        else if (data.state === "idle" && !wantListening) { dot.className = "dot done"; sub.textContent = data.text; }
+        else if (data.state === "idle") { sub.textContent = "正在聆听…（上一个任务已完成）"; }
+      } else if (data.kind === "progress") {
+        sub.textContent = data.text; addLog(data.text);
+      } else if (data.kind === "assistant") {
+        replyText.textContent = data.text;
+        reply.classList.add("show");
+        addLog("Cursor：" + data.text, "assistant");
+      } else if (data.kind === "speak") {
+        speak(data.text);
+      } else if (data.kind === "mute") {
+        // Cursor 正用系统语音播报：暂停识别，避免录到扬声器
+        pauseMic();
+      } else if (data.kind === "unmute") {
+        resumeMic();
+      } else if (data.kind === "settings") {
+        if (typeof data.autoSpeak === "boolean" && data.autoSpeak !== speakEnabled) applyAutoSpeak(data.autoSpeak);
+      } else if (data.kind === "error") {
+        addLog(data.text, "error");
+      } else if (data.kind === "hello") {
+        addLog(data.text);
+      }
+    };
+    es.onerror = () => { sub.textContent = "与 Cursor 的连接断开，请回到 Cursor 重新点麦克风。"; };
+
+    // 不自动开始：需要用户点一下光球，这一下同时解锁声音播放并触发麦克风授权
+    sub.textContent = "点击光球开始";
+  </script>
+</body>
+</html>
