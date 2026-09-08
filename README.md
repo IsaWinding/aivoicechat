@@ -8,9 +8,17 @@
 
 **仓库：** https://github.com/IsaWinding/aivoicechat
 
+## 快速开始
+
+1. 克隆仓库并编译：`git clone https://github.com/IsaWinding/aivoicechat.git && cd aivoicechat && npm install && npm run compile`
+2. 在 Cursor 中按 `F5` 启动扩展，或执行 `npm run package` 生成 VSIX 后安装
+3. 在设置里填入 [Cursor API Key](https://cursor.com/dashboard/integrations)（或设置环境变量 `CURSOR_API_KEY`）
+4. 打开工作区，按 `Ctrl+Alt+V` 打开面板，点击麦克风并在浏览器中允许麦克风
+
 ## 目录
 
 - [功能概览](#功能概览)
+- [架构简述](#架构简述)
 - [准备](#准备)
 - [安装与调试](#安装与调试)
 - [配置](#配置)
@@ -18,8 +26,10 @@
 - [命令与快捷键](#命令与快捷键)
 - [语音说明](#语音说明)
 - [对话体验](#对话体验)
+- [常见问题](#常见问题)
 - [开发与测试](#开发与测试)
 - [项目结构](#项目结构)
+- [版本记录](#版本记录)
 - [注意](#注意)
 - [相关文档](#相关文档)
 
@@ -30,6 +40,25 @@
 - Windows 系统 TTS 播报；其他平台走浏览器或面板朗读
 - 独立口语模型整理长回答，结合上下文挑重点播报
 - 插话打断、连续补充合并、停止 / 新会话 / 取消任务
+
+## 架构简述
+
+```mermaid
+flowchart LR
+  U[用户语音/文字] --> P[侧边栏面板]
+  P --> B[127.0.0.1 浏览器桥]
+  B --> R[浏览器 SpeechRecognition]
+  P --> A[Cursor SDK Agent]
+  A --> W[工作区工具读写/命令]
+  A --> T[完整文字结果]
+  T --> S[口语整理 Agent]
+  S --> TTS[系统 TTS / 浏览器朗读]
+  TTS --> U
+```
+
+- **任务 Agent**：读写文件、跑命令，输出完整 Markdown 文字
+- **口语 Agent**：只读上下文，禁用工具，把长结果压缩成 60–220 字口语
+- **浏览器桥**：仅监听 `127.0.0.1`，随机令牌鉴权，SSE 推送状态
 
 ## 准备
 
@@ -113,6 +142,50 @@ Cursor / VS Code 的 Webview 不允许访问麦克风（无法弹出授权），
 - 停止按钮同时停止语音和当前任务；新会话清理待发送内容。取消不能撤销已经完成的文件或命令操作
 - 语音使用浏览器 SpeechRecognition 和系统 TTS，并非端到端实时语音模型。识别延迟、外放回声和音色取决于浏览器、网络及设备
 
+## 常见问题
+
+### 麦克风打不开或识别失败
+
+- Cursor 面板内 Webview **无法**弹出麦克风授权，请保持 `aivoicechat.speechInput` 为 `browser`
+- 国内网络优先用 **Edge**；Chrome 可能报「语音服务网络连接失败」
+- 浏览器页需点击「允许麦克风」；关闭页后再次点麦克风会重新打开
+- 防火墙勿拦截本机 `127.0.0.1` 临时端口
+
+### 有文字但没有声音
+
+- Windows 确认已安装中文语音包；可运行命令「试播语音（测试扬声器）」
+- 非 Windows 需先**点击浏览器识别页**一次，才能播放 TTS
+- 检查 `aivoicechat.autoSpeak` 是否为 `true`，面板或浏览器页「播报」是否开启
+- 口语整理超时（15 秒）时会提示看文字，属正常降级
+
+### Agent 无响应或报错
+
+- 确认已打开**工作区文件夹**（不是单文件）
+- 检查 API Key：设置 `aivoicechat.apiKey` 或环境变量 `CURSOR_API_KEY`
+- Node.js 版本需 ≥ 22.13（Cursor 扩展宿主要求）
+- 任务进度只在本扩展面板显示，不会出现在 Cursor 内置聊天窗口
+
+### API Key 配置示例
+
+```json
+{
+  "aivoicechat.apiKey": "你的 Cursor API Key",
+  "aivoicechat.model": "composer-2.5",
+  "aivoicechat.language": "zh-CN",
+  "aivoicechat.autoSpeak": true
+}
+```
+
+也可在终端启动 Cursor 前设置环境变量：
+
+```bash
+# Windows PowerShell
+$env:CURSOR_API_KEY = "你的 Key"
+
+# macOS / Linux
+export CURSOR_API_KEY="你的 Key"
+```
+
 ## 开发与测试
 
 | 脚本 | 说明 |
@@ -144,6 +217,12 @@ aivoicechat/
 └── esbuild.mjs          # 构建配置
 ```
 
+## 版本记录
+
+| 版本 | 说明 |
+| --- | --- |
+| **0.5.1** | 浏览器麦克风桥；Windows 系统 TTS；独立口语整理 Agent；插话打断与连续补充；26 项本地测试 + 真实模型口语测试 |
+
 ## 注意
 
 - SDK 跑的是独立 Agent，不会出现在你正在看的那条 Cursor 聊天里，进度以本面板为准
@@ -152,3 +231,7 @@ aivoicechat/
 ## 相关文档
 
 - [语音聊天测试与体验对比](docs/voice-test-report.md) — 口语整理、插话打断、真实模型测试记录
+
+---
+
+**English (brief):** A Cursor/VS Code extension for voice and text chat with a local Cursor Agent. Speech input uses a localhost browser bridge (Webview cannot access the mic). Spoken replies are summarized by a separate tool-free Agent call. Requires Cursor API Key and Node.js ≥ 22.13.
