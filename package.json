@@ -4,6 +4,10 @@
   "description": "用语音或文字把任务交给 Cursor Agent，并在侧边栏以文字和语音回报进度",
   "version": "0.5.1",
   "publisher": "aivoicechat",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/IsaWinding/aivoicechat.git"
+  },
   "engines": {
     "vscode": "^1.90.0",
     "node": ">=22.13.0"
@@ -149,11 +153,12 @@
     "test:smoke": "node esbuild.mjs --smoke && node out/smoke.js"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.6"
+    "@cursor/sdk": "^1.0.31"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
     "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.25.4",
     "typescript": "^5.8.3"
   }

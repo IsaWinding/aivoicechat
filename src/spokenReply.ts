@@ -1,4 +1,4 @@
-import { AgentSession, type AgentSessionOptions } from "./agentSession";
+import { replyForSpeech } from "./progress";
 
 export interface SpokenHistoryItem {
   text: string;
@@ -82,62 +82,23 @@ export function isSpeakableReply(text: string): boolean {
   return true;
 }
 
-function fallback(context: SpokenReplyContext): SpokenReply {
+export function composeSpokenReply(context: SpokenReplyContext): SpokenReply {
+  const summary = replyForSpeech(context.fullResult);
+  if (summary) {
+    const text = context.status === "error" && !/失败|未完成|无法|出错|错误/.test(summary)
+      ? `这次任务没有完成。${summary}`
+      : summary;
+    return { fallback: false, text };
+  }
   return { fallback: true, text: context.status === "error"
-    ? "这次任务没有完成，具体错误已经显示在文字里。语音整理暂时不可用。"
-    : "完整结果已经显示在文字里，语音整理暂时不可用，请先查看文字。" };
+    ? "这次任务没有完成，具体错误已经显示在文字里。"
+    : "任务已经处理完成，完整结果已经显示在文字里。" };
 }
 
 export class SpokenReplyComposer {
-  private current: AbortController | undefined;
+  cancel(): void {}
 
-  constructor(private readonly createSession = () => new AgentSession("speech"), private readonly timeoutMs = 15000) {}
-
-  cancel(): void {
-    this.current?.abort();
-    this.current = undefined;
-  }
-
-  async compose(options: AgentSessionOptions, context: SpokenReplyContext): Promise<SpokenReply | undefined> {
-    this.cancel();
-    const controller = new AbortController();
-    this.current = controller;
-    const session = this.createSession();
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, this.timeoutMs);
-    const cancelled = new Promise<undefined>(resolve => {
-      controller.signal.addEventListener("abort", () => {
-        void session.cancel().catch(() => {});
-        resolve(undefined);
-      }, { once: true });
-    });
-    const work = (async (): Promise<SpokenReply | undefined> => {
-      try {
-        await session.ensure(options);
-        if (controller.signal.aborted) return undefined;
-        let streamed = "";
-        const outcome = await session.send(spokenReplyPrompt(context), {
-          onEvent() {}, onDelta: text => { streamed += text; },
-        });
-        if (controller.signal.aborted) return undefined;
-        const text = (outcome.result ?? streamed).replace(/\s+/g, " ").trim();
-        if (outcome.status !== "finished" || !isSpeakableReply(text)) {
-          return fallback(context);
-        }
-        return { text, fallback: false };
-      } catch {
-        return controller.signal.aborted ? undefined : fallback(context);
-      } finally {
-        // Cleanup cannot delay interruption or a new user turn.
-        void session.dispose().catch(() => {});
-      }
-    })();
-    try {
-      const result = await Promise.race([work, cancelled]);
-      return timedOut ? fallback(context) : result;
-    } finally {
-      clearTimeout(timer);
-      if (this.current === controller) this.current = undefined;
-    }
+  async compose(_options: unknown, context: SpokenReplyContext): Promise<SpokenReply> {
+    return composeSpokenReply(context);
   }
 }

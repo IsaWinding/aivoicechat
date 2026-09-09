@@ -334,7 +334,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       });
 
       if (this.interrupted || this.resetting) return;
-      const finalText = (outcome.result ?? streamed).trim();
+      // Some SDK/runtime versions return an empty terminal result even though
+      // assistant text was received from the stream. Never erase that text.
+      const finalText = outcome.result?.trim() || streamed.trim();
       this.updateAssistant(assistantId, finalText, true);
       this.post({ type: "assistantDone", id: assistantId, text: finalText });
       if (finalText) {
